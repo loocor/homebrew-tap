@@ -39,7 +39,7 @@ describe("update-mcpmate-cask", () => {
     expect(cask).toContain('version "0.3.4-beta"');
     expect(cask).toContain("on_macos do"); expect(cask).toContain("on_linux do");
     for (const [key, digest] of Object.entries({ "macos-arm64-dmg": "8f8f1c283e53d955b0da33d74afdde9bc30e92f6fc3114a18d2ebf6d75d29ce1", "macos-x64-dmg": "2c32b23fccd61a9c67769e837d763dee8efddb0be45c95290fdeec2c9e4eb3be", "linux-arm64-appimage": "25ec91d39a54d7bb5a9c63dda4f72335e9e6283a2693b0bc0e8bb103b0b8bff2", "linux-x64-appimage": "0295911991747e766cd3441f26dc9cd89c58fcf45018fd4ca1242c8277952f13" })) {
-      expect(cask).toContain(`url "https://public.mcp.umate.ai/downloads/homebrew/v0.3.4-beta/${key}"`);
+      expect(cask).toContain(`url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/${key}", verified: "mcp.umate.ai"`);
       expect(cask).toContain(`sha256 "${digest}"`);
     }
   });
@@ -57,9 +57,9 @@ describe("update-mcpmate-cask", () => {
     const linux = cask.split("  on_linux do\n")[1].split("\n  caveats")[0];
     const arm = linux.split("    on_arm do\n")[1].split("    end\n    on_intel")[0];
     const intel = linux.split("    on_intel do\n")[1].split("    end\n")[0];
-    expect(arm).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v0.3.4-beta/linux-arm64-appimage"');
+    expect(arm).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-arm64-appimage", verified: "mcp.umate.ai"');
     expect(arm).toContain('app_image "MCPMate_0.3.4_linux_arm64.AppImage", target: "MCPMate.AppImage"');
-    expect(intel).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v0.3.4-beta/linux-x64-appimage"');
+    expect(intel).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-x64-appimage", verified: "mcp.umate.ai"');
     expect(intel).toContain('app_image "MCPMate_0.3.4_linux_x64.AppImage", target: "MCPMate.AppImage"');
   });
   test("does not add forbidden fallback or lifecycle artifacts", async () => {
@@ -70,14 +70,20 @@ describe("update-mcpmate-cask", () => {
   });
   test("supports manifest URL mode without any alternate source", async () => {
     let requestedUrl = "";
-    await updateCask(["--manifest-url", "https://admin.example.test/releases/v0.3.4-beta.json"], async (url) => { requestedUrl = url.toString(); return new Response(Bun.file(fixturePath)); });
-    expect(requestedUrl).toBe("https://admin.example.test/releases/v0.3.4-beta.json"); expect(await readFile(caskPath, "utf8")).toContain('version "0.3.4-beta"');
+    await updateCask(["--manifest-url", "https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta"], async (url) => { requestedUrl = url.toString(); return new Response(Bun.file(fixturePath)); });
+    expect(requestedUrl).toBe("https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta"); expect(await readFile(caskPath, "utf8")).toContain('version "0.3.4-beta"');
   });
   test("rejects missing, conflicting, and malformed CLI sources with diagnostics", async () => {
     expect((await runUpdater()).stderr).toContain("Provide exactly one source"); expect((await runUpdater("--manifest-file", fixturePath, "--manifest-url", "https://example.test/manifest.json")).stderr).toContain("Provide exactly one source"); expect((await runUpdater("--manifest-url", "ftp://example.test/manifest.json")).stderr).toContain("Manifest URL must be an HTTPS URL");
   });
+  test.each([["GitHub manifest origin", "https://github.com/loocor/mcpmate/releases/download/v0.3.4-beta/update.json"], ["latest release route", "https://public.mcp.umate.ai/downloads/releases/latest"], ["extra path component", "https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta/update.json"], ["query", "https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta?download=1"], ["credentials", "https://token@public.mcp.umate.ai/downloads/releases/v0.3.4-beta"], ["fragment", "https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta#fragment"]])("rejects a non-canonical manifest URL source: %s", async (_case, url) => {
+    await expect(updateCask(["--manifest-url", url], async () => new Response(Bun.file(fixturePath)))).rejects.toThrow("Manifest URL must be canonical");
+  });
+  test("rejects manifest URL and manifest tag mismatches", async () => {
+    await expect(updateCask(["--manifest-url", "https://public.mcp.umate.ai/downloads/releases/v0.3.5-beta"], async () => new Response(Bun.file(fixturePath)))).rejects.toThrow("Manifest URL tag must exactly match the manifest tag");
+  });
   test("fails loudly when manifest URL fetching fails", async () => {
-    await expect(updateCask(["--manifest-url", "https://admin.example.test/releases/v0.3.4-beta.json"], async () => { throw new Error("connection refused"); })).rejects.toThrow("Unable to fetch manifest");
+    await expect(updateCask(["--manifest-url", "https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta"], async () => { throw new Error("connection refused"); })).rejects.toThrow("Unable to fetch manifest");
   });
   test("rejects an unsupported schema version with a diagnostic", async () => { const path = await temporaryManifest((manifest) => { manifest.schemaVersion = 3; }); expect((await runUpdater("--manifest-file", path)).stderr).toContain("Manifest schemaVersion must be 2"); });
   test("rejects a missing required asset with a diagnostic", async () => { const path = await temporaryManifest((manifest) => { delete (manifest.assets as Record<string, unknown>)["linux-x64-appimage"]; }); expect((await runUpdater("--manifest-file", path)).stderr).toContain("Manifest is missing required asset: linux-x64-appimage"); });

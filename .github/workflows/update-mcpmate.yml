@@ -1,0 +1,115 @@
+name: Update MCPMate beta Cask
+
+on:
+  repository_dispatch:
+    types: [mcpmate_release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact release tag
+        required: true
+        type: string
+      manifest_url:
+        description: Exact public HTTPS release manifest URL
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Homebrew
+        run: |
+          set -euo pipefail
+          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          printf '%s\n' "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+
+      - name: Validate release dispatch
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.tag || inputs.tag }}
+          MANIFEST_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.manifest_url || inputs.manifest_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_TAG" ] || [ -z "$MANIFEST_URL" ]; then
+            echo "tag and manifest_url are required" >&2
+            exit 1
+          fi
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "tag must be an exact semver-style v* release tag" >&2
+            exit 1
+          fi
+          export RELEASE_TAG MANIFEST_URL
+          bun -e '
+            const tag = process.env.RELEASE_TAG;
+            const manifestUrl = new URL(process.env.MANIFEST_URL);
+            if (manifestUrl.protocol !== "https:" || manifestUrl.username || manifestUrl.password || manifestUrl.search || manifestUrl.hash) {
+              throw new Error("manifest_url must be a canonical HTTPS URL");
+            }
+            if (manifestUrl.origin !== "https://public.mcp.umate.ai" || manifestUrl.pathname !== `/downloads/releases/${tag}`) {
+              throw new Error("manifest_url must be the exact Admin release manifest URL for the tag");
+            }
+          '
+          printf 'tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          printf 'manifest_url=%s\n' "$MANIFEST_URL" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate and validate Cask
+        id: cask
+        env:
+          MANIFEST_URL: ${{ steps.release.outputs.manifest_url }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          bun run update:mcpmate-cask --manifest-url "$MANIFEST_URL"
+          bun test
+          brew tap loocor/tap "$GITHUB_WORKSPACE"
+          tap_path="$(brew --repository loocor/tap)"
+          cp Casks/mcpmate@beta.rb "$tap_path/Casks/mcpmate@beta.rb"
+          brew style --cask loocor/tap/mcpmate@beta
+          brew audit --cask --strict loocor/tap/mcpmate@beta
+          brew info --cask loocor/tap/mcpmate@beta
+          git fetch origin main
+          if git diff --quiet origin/main -- Casks/mcpmate@beta.rb; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create update pull request
+        if: steps.cask.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          MANIFEST_URL: ${{ steps.release.outputs.manifest_url }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/mcpmate-${VERSION}"
+          TITLE="chore(mcpmate): update beta to ${VERSION}"
+          if [ "$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')" -gt 0 ]; then
+            echo "An update pull request already exists for $RELEASE_TAG."
+            exit 0
+          fi
+          SHA256S="$(awk -F '"' '/^[[:space:]]*sha256 / { print $2 }' Casks/mcpmate@beta.rb | paste -sd ', ' -)"
+          printf '%s\n\n' "$TITLE" > "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "Release tag: \`$RELEASE_TAG\`." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "Public manifest URL: \`$MANIFEST_URL\`." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "SHA-256 provenance: exact Admin manifest \`$MANIFEST_URL\` (Cask digests: \`$SHA256S\`)." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "Validation: \`bun install --frozen-lockfile\`, \`bun test\`, Homebrew style, audit, and parse checks." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          git checkout -b "$BRANCH"
+          git add Casks/mcpmate@beta.rb
+          git commit -m "$TITLE"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/mcpmate-pr.md"

@@ -1,0 +1,86 @@
+name: Cask CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: ${{ matrix.os }} / Homebrew ${{ matrix.homebrew }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            homebrew: current
+          - os: ubuntu-latest
+            homebrew: "5.1.12"
+          - os: ubuntu-latest
+            homebrew: current
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Linux Homebrew
+        if: runner.os == 'Linux'
+        env:
+          HOMEBREW_VERSION: ${{ matrix.homebrew }}
+        run: |
+          set -euo pipefail
+          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          brew_bin="/home/linuxbrew/.linuxbrew/bin/brew"
+          "$brew_bin" update
+          if [ "$HOMEBREW_VERSION" = "5.1.12" ]; then
+            brew_repository="$("$brew_bin" --repository)"
+            git -C "$brew_repository" fetch --force --tags origin 5.1.12
+            git -C "$brew_repository" checkout --detach 5.1.12
+          fi
+          printf '%s\n' "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+
+      - name: Verify pinned Linux Homebrew support
+        if: runner.os == 'Linux' && matrix.homebrew == '5.1.12'
+        run: |
+          set -euo pipefail
+          test "$(brew --version | head -n 1)" = "Homebrew 5.1.12"
+
+      - name: Register checked out tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew tap loocor/tap "$GITHUB_WORKSPACE"
+
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test Cask generator
+        run: bun test
+
+      - name: Style and audit Cask
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          brew style --cask loocor/tap/mcpmate@beta
+          brew audit --cask --strict loocor/tap/mcpmate@beta
+
+      - name: Parse Cask
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew info --cask loocor/tap/mcpmate@beta
+
+      - name: Construct native Linux AppImage artifact
+        if: runner.os == 'Linux'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          HOMEBREW_NO_INSTALL_FROM_API=1 brew install --cask loocor/tap/mcpmate@beta
+          test -L "$HOME/Applications/MCPMate.AppImage"
+          test -x "$(readlink -f "$HOME/Applications/MCPMate.AppImage")"
+          brew uninstall --cask loocor/tap/mcpmate@beta
+          test ! -e "$HOME/Applications/MCPMate.AppImage"

@@ -52,5 +52,5 @@ bun run update:mcpmate-cask --manifest-file path/to/release-manifest-v2.json
 ```
 
 The updater accepts exactly one source: `--manifest-file <path>` or
-`--manifest-url <https-url>`. It validates the release manifest and writes only
-`Casks/mcpmate@beta.rb`.
+`--manifest-url https://public.mcp.umate.ai/downloads/releases/<tag>`. It
+validates the release manifest and writes only `Casks/mcpmate@beta.rb`.

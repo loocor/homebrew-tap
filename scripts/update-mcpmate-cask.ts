@@ -21,6 +21,7 @@ type ReleaseManifest = {
 };
 
 type ManifestFetcher = (input: URL) => Promise<Response>;
+type ManifestSource = { type: "file"; value: string } | { type: "url"; value: string; tag: string };
 
 const requiredAssets: Record<RequiredAssetKey, Pick<Asset, "platform" | "arch" | "format">> = {
   "macos-arm64-dmg": { platform: "macos", arch: "arm64", format: "dmg" },
@@ -33,12 +34,13 @@ const semver = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-
 const sha256 = /^[a-fA-F0-9]{64}$/;
 const safeBasename = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const homebrewOrigin = "https://public.mcp.umate.ai";
+const manifestPath = /^\/downloads\/releases\/(?<tag>v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/;
 
 function fail(message: string): never {
   throw new Error(message);
 }
 
-function parseSource(arguments_: string[]): { type: "file" | "url"; value: string } {
+function parseSource(arguments_: string[]): ManifestSource {
   if (arguments_.length !== 2) {
     fail("Provide exactly one source: --manifest-file <path> or --manifest-url <https-url>");
   }
@@ -58,7 +60,19 @@ function parseSource(arguments_: string[]): { type: "file" | "url"; value: strin
     if (url.protocol !== "https:") {
       fail("Manifest URL must be an HTTPS URL");
     }
-    return { type: "url", value: url.toString() };
+    const match = url.pathname.match(manifestPath);
+    if (
+      value !== url.toString() ||
+      url.origin !== homebrewOrigin ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      !match?.groups?.tag
+    ) {
+      fail("Manifest URL must be canonical: https://public.mcp.umate.ai/downloads/releases/<tag>");
+    }
+    return { type: "url", value: url.toString(), tag: match.groups.tag };
   }
 
   return { type: "file", value };
@@ -133,8 +147,9 @@ function parseManifest(source: string): ReleaseManifest {
   return { ...manifest, assets: normalizedAssets as Record<RequiredAssetKey, Asset> } as ReleaseManifest;
 }
 
-function renderAsset(asset: Asset): string {
-  return `      sha256 "${asset.sha256}"\n      url "${asset.homebrewUrl}"`;
+function renderAsset(asset: Asset, version: string): string {
+  const versionedUrl = asset.homebrewUrl.replace(`/v${version}/`, "/v#{version}/");
+  return `      sha256 "${asset.sha256}"\n      url "${versionedUrl}", verified: "mcp.umate.ai"`;
 }
 
 function renderAppImage(asset: Asset): string {
@@ -142,10 +157,10 @@ function renderAppImage(asset: Asset): string {
 }
 
 function renderCask(manifest: ReleaseManifest): string {
-  const macosArm = renderAsset(manifest.assets["macos-arm64-dmg"]);
-  const macosX64 = renderAsset(manifest.assets["macos-x64-dmg"]);
-  const linuxArm = renderAsset(manifest.assets["linux-arm64-appimage"]);
-  const linuxX64 = renderAsset(manifest.assets["linux-x64-appimage"]);
+  const macosArm = renderAsset(manifest.assets["macos-arm64-dmg"], manifest.version);
+  const macosX64 = renderAsset(manifest.assets["macos-x64-dmg"], manifest.version);
+  const linuxArm = renderAsset(manifest.assets["linux-arm64-appimage"], manifest.version);
+  const linuxX64 = renderAsset(manifest.assets["linux-x64-appimage"], manifest.version);
   const linuxArmAppImage = renderAppImage(manifest.assets["linux-arm64-appimage"]);
   const linuxX64AppImage = renderAppImage(manifest.assets["linux-x64-appimage"]);
 
@@ -210,7 +225,11 @@ async function fetchManifest(url: string, fetcher: ManifestFetcher): Promise<str
 export async function updateCask(arguments_: string[], fetcher: ManifestFetcher = fetch): Promise<void> {
   const source = parseSource(arguments_);
   const manifestText = source.type === "file" ? await readFile(source.value, "utf8") : await fetchManifest(source.value, fetcher);
-  const cask = renderCask(parseManifest(manifestText));
+  const manifest = parseManifest(manifestText);
+  if (source.type === "url" && source.tag !== manifest.tag) {
+    fail("Manifest URL tag must exactly match the manifest tag");
+  }
+  const cask = renderCask(manifest);
   await writeFile(join(import.meta.dir, "..", "Casks", "mcpmate@beta.rb"), cask);
 }
 
