@@ -1,0 +1,12 @@
+{
+  "name": "homebrew-tap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "update:mcpmate-cask": "bun scripts/update-mcpmate-cask.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14"
+  }
+}
