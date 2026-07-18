@@ -180,6 +180,13 @@ describe("update-mcpmate-cask", () => {
 		expect(cask).not.toMatch(/^\s*regex\(.+\/i\)$/m);
 		expect(cask).toContain("strategy :github_releases do |json, regex|");
 	});
+	test("uses core Ruby truthiness for livecheck matches", async () => {
+		expect((await runUpdater("--manifest-file", fixturePath)).exitCode).toBe(0);
+		const cask = await readFile(betaCaskPath, "utf8");
+		expect(cask).toContain("next unless match");
+		expect(cask).not.toContain("match.blank?");
+		expect(cask).not.toContain("end.compact");
+	});
 	test("binds each AppImage source to its selected Linux architecture", async () => {
 		expect((await runUpdater("--manifest-file", fixturePath)).exitCode).toBe(0);
 		const cask = await readFile(betaCaskPath, "utf8");

@@ -259,7 +259,7 @@ function renderLivecheck(releaseChannel: ReleaseChannel): string {
         next if release["draft"]
 
         match = release["tag_name"]&.match(regex)
-        next if match.blank?
+        next unless match
 
         match[1]
       end
