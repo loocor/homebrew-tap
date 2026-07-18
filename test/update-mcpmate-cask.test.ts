@@ -68,7 +68,7 @@ describe("update-mcpmate-cask", () => {
     expect(cask).toContain('version "0.3.4-beta"');
     expect(cask).toContain("on_macos do"); expect(cask).toContain("on_linux do");
     for (const [key, digest] of Object.entries({ "macos-arm64-dmg": "8f8f1c283e53d955b0da33d74afdde9bc30e92f6fc3114a18d2ebf6d75d29ce1", "macos-x64-dmg": "2c32b23fccd61a9c67769e837d763dee8efddb0be45c95290fdeec2c9e4eb3be", "linux-arm64-appimage": "25ec91d39a54d7bb5a9c63dda4f72335e9e6283a2693b0bc0e8bb103b0b8bff2", "linux-x64-appimage": "0295911991747e766cd3441f26dc9cd89c58fcf45018fd4ca1242c8277952f13" })) {
-      expect(cask).toContain(`url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/${key}", verified: "mcp.umate.ai"`);
+      expect(cask).toContain(`url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/${key}"`);
       expect(cask).toContain(`sha256 "${digest}"`);
     }
   });
@@ -80,15 +80,27 @@ describe("update-mcpmate-cask", () => {
     expect(cask).toContain('app_image "MCPMate_0.3.4_linux_x64.AppImage", target: "MCPMate.AppImage"');
     expect(cask).toContain("Homebrew 5.1.12 or later");
   });
+  test("renders the canonical product homepage and product-level caveat", async () => {
+    expect((await runUpdater("--manifest-file", fixturePath)).exitCode).toBe(0);
+    const cask = await readFile(betaCaskPath, "utf8");
+    expect(cask).toContain('homepage "https://mcp.umate.ai/"');
+    expect(cask).toContain("MCPMate supports macOS and Linux on arm64 and x64.");
+    expect(cask).not.toContain("MCPMate Beta supports macOS and Linux on arm64 and x64.");
+    expect(cask).not.toContain('homepage "https://mcpmate.ai/"');
+  });
+  test("omits redundant URL verification for the shared homepage domain", async () => {
+    expect((await runUpdater("--manifest-file", fixturePath)).exitCode).toBe(0);
+    expect(await readFile(betaCaskPath, "utf8")).not.toContain("verified:");
+  });
   test("binds each AppImage source to its selected Linux architecture", async () => {
     expect((await runUpdater("--manifest-file", fixturePath)).exitCode).toBe(0);
     const cask = await readFile(betaCaskPath, "utf8");
     const linux = cask.split("  on_linux do\n")[1].split("\n  caveats")[0];
     const arm = linux.split("    on_arm do\n")[1].split("    end\n    on_intel")[0];
     const intel = linux.split("    on_intel do\n")[1].split("    end\n")[0];
-    expect(arm).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-arm64-appimage", verified: "mcp.umate.ai"');
+    expect(arm).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-arm64-appimage"');
     expect(arm).toContain('app_image "MCPMate_0.3.4_linux_arm64.AppImage", target: "MCPMate.AppImage"');
-    expect(intel).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-x64-appimage", verified: "mcp.umate.ai"');
+    expect(intel).toContain('url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-x64-appimage"');
     expect(intel).toContain('app_image "MCPMate_0.3.4_linux_x64.AppImage", target: "MCPMate.AppImage"');
   });
   test("does not add forbidden fallback or lifecycle artifacts", async () => {
@@ -196,6 +208,22 @@ describe("update-mcpmate-cask", () => {
   });
   test("fails loudly when manifest URL fetching fails", async () => {
     await expect(updateCask(["--manifest-url", "https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta"], async () => { throw new Error("connection refused"); })).rejects.toThrow("Unable to fetch manifest");
+  });
+  test("rejects manifest redirects without following them", async () => {
+    let redirectMode: RequestRedirect | undefined;
+    await expect(
+      updateCask(
+        ["--manifest-url", "https://public.mcp.umate.ai/downloads/releases/v0.3.4-beta"],
+        async (_url, init) => {
+          redirectMode = init?.redirect;
+          return new Response(null, {
+            status: 302,
+            headers: { location: "https://github.com/loocor/mcpmate/releases/download/v0.3.4-beta/update.json" },
+          });
+        },
+      ),
+    ).rejects.toThrow("Manifest redirects are not allowed");
+    expect(redirectMode).toBe("manual");
   });
   test("rejects an unsupported schema version with a diagnostic", async () => { const path = await temporaryManifest((manifest) => { manifest.schemaVersion = 3; }); expect((await runUpdater("--manifest-file", path)).stderr).toContain("Manifest schemaVersion must be 2"); });
   test("rejects a missing required asset with a diagnostic", async () => { const path = await temporaryManifest((manifest) => { delete (manifest.assets as Record<string, unknown>)["linux-x64-appimage"]; }); expect((await runUpdater("--manifest-file", path)).stderr).toContain("Manifest is missing required asset: linux-x64-appimage"); });

@@ -36,7 +36,7 @@ export type ReleaseTarget = {
   caskPath: "Casks/mcpmate.rb" | "Casks/mcpmate@beta.rb";
 };
 
-type ManifestFetcher = (input: URL) => Promise<Response>;
+type ManifestFetcher = (input: URL, init?: RequestInit) => Promise<Response>;
 type ManifestSource = { type: "file"; value: string } | { type: "url"; value: string; tag: string };
 
 const requiredAssets: Record<RequiredAssetKey, Pick<Asset, "platform" | "arch" | "format">> = {
@@ -175,7 +175,7 @@ function parseManifest(source: string): ReleaseManifest {
 
 function renderAsset(asset: Asset, version: string): string {
   const versionedUrl = asset.homebrewUrl.replace(`/v${version}/`, "/v#{version}/");
-  return `      sha256 "${asset.sha256}"\n      url "${versionedUrl}", verified: "mcp.umate.ai"`;
+  return `      sha256 "${asset.sha256}"\n      url "${versionedUrl}"`;
 }
 
 function renderAppImage(asset: Asset): string {
@@ -206,7 +206,7 @@ cask "${target.caskToken}" do
 
   name "MCPMate"
   desc "${target.releaseChannel === "beta" ? "Beta channel for MCP server management and operations" : "MCP server management and operations workspace"}"
-  homepage "https://mcpmate.ai/"
+  homepage "https://mcp.umate.ai/"
 
   conflicts_with cask: "${target.releaseChannel === "beta" ? "mcpmate" : "mcpmate@beta"}"
 
@@ -233,7 +233,7 @@ ${linuxX64AppImage}
   end
 
   caveats <<~EOS
-    MCPMate ${target.releaseChannel === "beta" ? "Beta" : "Stable"} supports macOS and Linux on arm64 and x64.
+    MCPMate supports macOS and Linux on arm64 and x64.
     Linux AppImage installation requires Homebrew 5.1.12 or later.
     Exit the MCPMate app and any MCPMate service normally before uninstalling.
     Uninstall does not terminate services or remove ~/.mcpmate, including logs,
@@ -245,7 +245,15 @@ end
 
 async function fetchManifest(url: string, fetcher: ManifestFetcher): Promise<string> {
   try {
-    const response = await fetcher(new URL(url));
+    const requestUrl = new URL(url);
+    const response = await fetcher(requestUrl, { redirect: "manual" });
+    if (
+      response.redirected ||
+      (response.url && response.url !== requestUrl.toString()) ||
+      (response.status >= 300 && response.status < 400)
+    ) {
+      fail("Manifest redirects are not allowed");
+    }
     if (!response.ok) {
       fail(`Unable to fetch manifest: HTTP ${response.status}`);
     }
