@@ -1,0 +1,121 @@
+name: Update MCPMate Cask
+
+on:
+  repository_dispatch:
+    types: [mcpmate_release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact release tag
+        required: true
+        type: string
+      manifest_url:
+        description: Exact public HTTPS release manifest URL
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Validate release dispatch
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.tag || inputs.tag }}
+          MANIFEST_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.manifest_url || inputs.manifest_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_TAG" ] || [ -z "$MANIFEST_URL" ]; then
+            echo "tag and manifest_url are required" >&2
+            exit 1
+          fi
+          bun scripts/release-contract.ts "$RELEASE_TAG" "$MANIFEST_URL"
+          printf 'tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          printf 'manifest_url=%s\n' "$MANIFEST_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Install Homebrew
+        run: |
+          set -euo pipefail
+          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          printf '%s\n' "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+
+      - name: Generate and validate Cask
+        id: cask
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          MANIFEST_URL: ${{ steps.release.outputs.manifest_url }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          TARGET_JSON="$(bun scripts/update-mcpmate-cask.ts --manifest-url "$MANIFEST_URL")"
+          RELEASE_CHANNEL="$(jq -er '.releaseChannel' <<<"$TARGET_JSON")"
+          CASK_TOKEN="$(jq -er '.caskToken' <<<"$TARGET_JSON")"
+          CASK_PATH="$(jq -er '.caskPath' <<<"$TARGET_JSON")"
+          VERSION="$(jq -er '.version' <<<"$TARGET_JSON")"
+          test "$(jq -er '.tag' <<<"$TARGET_JSON")" = "$RELEASE_TAG"
+          case "$RELEASE_CHANNEL:$CASK_TOKEN:$CASK_PATH" in
+            stable:mcpmate:Casks/mcpmate.rb|beta:mcpmate@beta:Casks/mcpmate@beta.rb) ;;
+            *) echo "validated manifest returned an invalid Cask target" >&2; exit 1 ;;
+          esac
+          bun test
+          brew tap loocor/tap "$GITHUB_WORKSPACE"
+          tap_path="$(brew --repository loocor/tap)"
+          cp "$CASK_PATH" "$tap_path/$CASK_PATH"
+          brew style --cask "loocor/tap/$CASK_TOKEN"
+          brew audit --cask --strict "loocor/tap/$CASK_TOKEN"
+          brew info --cask "loocor/tap/$CASK_TOKEN"
+          git fetch origin main
+          printf 'release_channel=%s\n' "$RELEASE_CHANNEL" >> "$GITHUB_OUTPUT"
+          printf 'cask_token=%s\n' "$CASK_TOKEN" >> "$GITHUB_OUTPUT"
+          printf 'cask_path=%s\n' "$CASK_PATH" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          if [ -z "$(git status --porcelain --untracked-files=all -- "$CASK_PATH")" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create update pull request
+        if: steps.cask.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          MANIFEST_URL: ${{ steps.release.outputs.manifest_url }}
+          RELEASE_CHANNEL: ${{ steps.cask.outputs.release_channel }}
+          CASK_PATH: ${{ steps.cask.outputs.cask_path }}
+          VERSION: ${{ steps.cask.outputs.version }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/mcpmate-${RELEASE_CHANNEL}-${VERSION}"
+          TITLE="chore(mcpmate): update ${RELEASE_CHANNEL} to ${VERSION}"
+          if [ "$(gh pr list --head "$BRANCH" --state all --json number --jq 'length')" -gt 0 ]; then
+            echo "An update pull request already exists for $RELEASE_TAG."
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            echo "Remote branch $BRANCH exists without a pull request." >&2
+            exit 1
+          fi
+          SHA256S="$(awk -F '"' '/^[[:space:]]*sha256 / { print $2 }' "$CASK_PATH" | paste -sd ', ' -)"
+          printf '%s\n\n' "$TITLE" > "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "Release tag: \`$RELEASE_TAG\`." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "Public manifest URL: \`$MANIFEST_URL\`." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "SHA-256 provenance: exact Admin manifest \`$MANIFEST_URL\` (Cask digests: \`$SHA256S\`)." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          printf '%s\n' "Validation: \`bun install --frozen-lockfile\`, \`bun test\`, Homebrew style, audit, and parse checks." >> "$RUNNER_TEMP/mcpmate-pr.md"
+          git checkout -b "$BRANCH"
+          git add -- "$CASK_PATH"
+          git commit -m "$TITLE"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/mcpmate-pr.md"
