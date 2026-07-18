@@ -7,6 +7,21 @@ cask "mcpmate@beta" do
   desc "Beta channel for MCP server management and operations"
   homepage "https://mcp.umate.ai/"
 
+  livecheck do
+    url "https://github.com/loocor/mcpmate"
+    regex(/^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-beta(?:\.(?:0|[1-9]\d*))?)$/)
+    strategy :github_releases do |json, regex|
+      json.map do |release|
+        next if release["draft"]
+
+        match = release["tag_name"]&.match(regex)
+        next unless match
+
+        match[1]
+      end
+    end
+  end
+
   conflicts_with cask: "mcpmate"
 
   on_macos do
