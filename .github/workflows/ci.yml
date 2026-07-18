@@ -65,13 +65,25 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
           set -euo pipefail
-          brew style --cask loocor/tap/mcpmate@beta
-          brew audit --cask --strict loocor/tap/mcpmate@beta
+          cask_paths="$(git ls-files 'Casks/mcpmate*.rb')"
+          test -n "$cask_paths"
+          while IFS= read -r cask_path; do
+            cask_token="$(basename "$cask_path" .rb)"
+            brew style --cask "loocor/tap/$cask_token"
+            brew audit --cask --strict "loocor/tap/$cask_token"
+          done <<< "$cask_paths"
 
       - name: Parse Cask
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: brew info --cask loocor/tap/mcpmate@beta
+        run: |
+          set -euo pipefail
+          cask_paths="$(git ls-files 'Casks/mcpmate*.rb')"
+          test -n "$cask_paths"
+          while IFS= read -r cask_path; do
+            cask_token="$(basename "$cask_path" .rb)"
+            brew info --cask "loocor/tap/$cask_token"
+          done <<< "$cask_paths"
 
       - name: Construct native Linux AppImage artifact
         if: runner.os == 'Linux'
@@ -79,8 +91,13 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
           set -euo pipefail
-          HOMEBREW_NO_INSTALL_FROM_API=1 brew install --cask loocor/tap/mcpmate@beta
-          test -L "$HOME/Applications/MCPMate.AppImage"
-          test -x "$(readlink -f "$HOME/Applications/MCPMate.AppImage")"
-          brew uninstall --cask loocor/tap/mcpmate@beta
-          test ! -e "$HOME/Applications/MCPMate.AppImage"
+          cask_paths="$(git ls-files 'Casks/mcpmate*.rb')"
+          test -n "$cask_paths"
+          while IFS= read -r cask_path; do
+            cask_token="$(basename "$cask_path" .rb)"
+            HOMEBREW_NO_INSTALL_FROM_API=1 brew install --cask "loocor/tap/$cask_token"
+            test -L "$HOME/Applications/MCPMate.AppImage"
+            test -x "$(readlink -f "$HOME/Applications/MCPMate.AppImage")"
+            brew uninstall --cask "loocor/tap/$cask_token"
+            test ! -e "$HOME/Applications/MCPMate.AppImage"
+          done <<< "$cask_paths"

@@ -1,5 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  homebrewOrigin,
+  manifestPathPrefix,
+  parseReleaseTag,
+  releaseManifestUrl,
+  type ReleaseChannel,
+} from "./release-contract";
 
 type RequiredAssetKey = "macos-arm64-dmg" | "macos-x64-dmg" | "linux-arm64-appimage" | "linux-x64-appimage";
 
@@ -14,10 +21,19 @@ type Asset = {
 };
 
 type ReleaseManifest = {
-  schemaVersion: number;
+  schemaVersion: 2;
   tag: string;
   version: string;
+  releaseChannel: ReleaseChannel;
   assets: Record<string, Asset>;
+};
+
+export type ReleaseTarget = {
+  releaseChannel: ReleaseChannel;
+  tag: string;
+  version: string;
+  caskToken: "mcpmate" | "mcpmate@beta";
+  caskPath: "Casks/mcpmate.rb" | "Casks/mcpmate@beta.rb";
 };
 
 type ManifestFetcher = (input: URL) => Promise<Response>;
@@ -30,11 +46,13 @@ const requiredAssets: Record<RequiredAssetKey, Pick<Asset, "platform" | "arch" |
   "linux-x64-appimage": { platform: "linux", arch: "x64", format: "appimage" },
 };
 
-const semver = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const sha256 = /^[a-fA-F0-9]{64}$/;
+const sha256 = /^[a-f0-9]{64}$/;
 const safeBasename = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const homebrewOrigin = "https://public.mcp.umate.ai";
-const manifestPath = /^\/downloads\/releases\/(?<tag>v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/;
+
+const releaseTargets: Record<ReleaseChannel, Pick<ReleaseTarget, "caskToken" | "caskPath">> = {
+  stable: { caskToken: "mcpmate", caskPath: "Casks/mcpmate.rb" },
+  beta: { caskToken: "mcpmate@beta", caskPath: "Casks/mcpmate@beta.rb" },
+};
 
 function fail(message: string): never {
   throw new Error(message);
@@ -60,7 +78,7 @@ function parseSource(arguments_: string[]): ManifestSource {
     if (url.protocol !== "https:") {
       fail("Manifest URL must be an HTTPS URL");
     }
-    const match = url.pathname.match(manifestPath);
+    const tag = url.pathname.startsWith(manifestPathPrefix) ? url.pathname.slice(manifestPathPrefix.length) : "";
     if (
       value !== url.toString() ||
       url.origin !== homebrewOrigin ||
@@ -68,11 +86,12 @@ function parseSource(arguments_: string[]): ManifestSource {
       url.password ||
       url.search ||
       url.hash ||
-      !match?.groups?.tag
+      !parseReleaseTag(tag) ||
+      value !== releaseManifestUrl(tag)
     ) {
       fail("Manifest URL must be canonical: https://public.mcp.umate.ai/downloads/releases/<tag>");
     }
-    return { type: "url", value: url.toString(), tag: match.groups.tag };
+    return { type: "url", value: url.toString(), tag };
   }
 
   return { type: "file", value };
@@ -93,11 +112,18 @@ function parseManifest(source: string): ReleaseManifest {
   if (manifest.schemaVersion !== 2) {
     fail("Manifest schemaVersion must be 2");
   }
-  if (typeof manifest.version !== "string" || !semver.test(manifest.version)) {
-    fail("Manifest version must be a semver-style version");
+  if (manifest.releaseChannel !== "stable" && manifest.releaseChannel !== "beta") {
+    fail('Manifest releaseChannel must be "stable" or "beta"');
   }
-  if (typeof manifest.tag !== "string" || manifest.tag !== `v${manifest.version}` || !/^v/.test(manifest.tag)) {
+  const tagChannel = typeof manifest.tag === "string" ? parseReleaseTag(manifest.tag) : null;
+  if (!tagChannel) {
+    fail("Manifest tag must be a supported stable or beta release tag");
+  }
+  if (typeof manifest.version !== "string" || manifest.tag !== `v${manifest.version}`) {
     fail("Manifest tag must exactly match the full version with a v prefix");
+  }
+  if (manifest.releaseChannel !== tagChannel) {
+    fail("Manifest releaseChannel does not match the release tag");
   }
   if (!manifest.assets || typeof manifest.assets !== "object") {
     fail("Manifest assets must be an object");
@@ -139,7 +165,7 @@ function parseManifest(source: string): ReleaseManifest {
       fail(`Manifest homebrewUrl must be canonical: ${key}`);
     }
     if (!sha256.test(asset.sha256)) {
-      fail(`Manifest sha256 must be 64 hexadecimal characters: ${key}`);
+      fail(`Manifest sha256 must be 64 lowercase hexadecimal characters: ${key}`);
     }
     normalizedAssets[key] = { ...asset, homebrewUrl: assetUrl.toString() };
   }
@@ -156,7 +182,16 @@ function renderAppImage(asset: Asset): string {
   return `      app_image "${asset.name}", target: "MCPMate.AppImage"`;
 }
 
-function renderCask(manifest: ReleaseManifest): string {
+function releaseTarget(manifest: ReleaseManifest): ReleaseTarget {
+  return {
+    releaseChannel: manifest.releaseChannel,
+    tag: manifest.tag,
+    version: manifest.version,
+    ...releaseTargets[manifest.releaseChannel],
+  };
+}
+
+function renderCask(manifest: ReleaseManifest, target: ReleaseTarget): string {
   const macosArm = renderAsset(manifest.assets["macos-arm64-dmg"], manifest.version);
   const macosX64 = renderAsset(manifest.assets["macos-x64-dmg"], manifest.version);
   const linuxArm = renderAsset(manifest.assets["linux-arm64-appimage"], manifest.version);
@@ -166,12 +201,14 @@ function renderCask(manifest: ReleaseManifest): string {
 
   return `# frozen_string_literal: true
 
-cask "mcpmate@beta" do
+cask "${target.caskToken}" do
   version "${manifest.version}"
 
   name "MCPMate"
-  desc "MCP server management and operations workspace"
+  desc "${target.releaseChannel === "beta" ? "Beta channel for MCP server management and operations" : "MCP server management and operations workspace"}"
   homepage "https://mcpmate.ai/"
+
+  conflicts_with cask: "${target.releaseChannel === "beta" ? "mcpmate" : "mcpmate@beta"}"
 
   on_macos do
     on_arm do
@@ -196,7 +233,7 @@ ${linuxX64AppImage}
   end
 
   caveats <<~EOS
-    MCPMate is a Beta release for macOS and Linux on arm64 and x64.
+    MCPMate ${target.releaseChannel === "beta" ? "Beta" : "Stable"} supports macOS and Linux on arm64 and x64.
     Linux AppImage installation requires Homebrew 5.1.12 or later.
     Exit the MCPMate app and any MCPMate service normally before uninstalling.
     Uninstall does not terminate services or remove ~/.mcpmate, including logs,
@@ -222,20 +259,24 @@ async function fetchManifest(url: string, fetcher: ManifestFetcher): Promise<str
   }
 }
 
-export async function updateCask(arguments_: string[], fetcher: ManifestFetcher = fetch): Promise<void> {
+export async function updateCask(arguments_: string[], fetcher: ManifestFetcher = fetch): Promise<ReleaseTarget> {
   const source = parseSource(arguments_);
   const manifestText = source.type === "file" ? await readFile(source.value, "utf8") : await fetchManifest(source.value, fetcher);
   const manifest = parseManifest(manifestText);
   if (source.type === "url" && source.tag !== manifest.tag) {
     fail("Manifest URL tag must exactly match the manifest tag");
   }
-  const cask = renderCask(manifest);
-  await writeFile(join(import.meta.dir, "..", "Casks", "mcpmate@beta.rb"), cask);
+  const target = releaseTarget(manifest);
+  const cask = renderCask(manifest, target);
+  await writeFile(join(import.meta.dir, "..", target.caskPath), cask);
+  return target;
 }
 
 if (import.meta.main) {
-  updateCask(process.argv.slice(2)).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
+  updateCask(process.argv.slice(2))
+    .then((target) => console.log(JSON.stringify(target)))
+    .catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
 }

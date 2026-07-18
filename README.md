@@ -3,15 +3,14 @@
 This public tap distributes Loocor desktop applications. MCPMate Beta is
 prepared here; future applications, including CodMate, may be co-located here.
 
-Before this Cask PR is merged or a release is announced, the Admin public
-exact-tag download contract must be deployed for every referenced asset. Until
-then, the versioned Admin URLs intentionally remain an external deployment
-prerequisite and must not be replaced with GitHub URLs or local fallbacks.
+The deployed Admin exact-tag manifest and tracked download routes are the
+release authority for every referenced asset. Each Cask update must validate
+that contract and must not replace versioned Admin URLs with GitHub URLs or
+local fallbacks.
 
 ## Install MCPMate Beta
 
-After the Admin download contract is deployed, MCPMate Beta supports macOS and
-Linux on arm64 and x64.
+MCPMate Beta supports macOS and Linux on arm64 and x64.
 
 ```sh
 brew install --cask loocor/tap/mcpmate@beta
@@ -45,7 +44,17 @@ user configuration. It does not stop services or remove their state.
 
 ## Maintainers
 
-Generate the cask only from an Admin release manifest:
+Generate a Cask only from an Admin release manifest. The validated
+`releaseChannel` selects the target; callers cannot provide a Cask path.
+
+| Channel | Cask token | Generated path |
+| --- | --- | --- |
+| Stable | `mcpmate` | `Casks/mcpmate.rb` |
+| Beta | `mcpmate@beta` | `Casks/mcpmate@beta.rb` |
+
+A stable Cask is not published until the first validated stable manifest generates it.
+Do not create a placeholder stable Cask or advertise stable installation before that
+event.
 
 ```sh
 bun run update:mcpmate-cask --manifest-file path/to/release-manifest-v2.json
@@ -53,4 +62,6 @@ bun run update:mcpmate-cask --manifest-file path/to/release-manifest-v2.json
 
 The updater accepts exactly one source: `--manifest-file <path>` or
 `--manifest-url https://public.mcp.umate.ai/downloads/releases/<tag>`. It
-validates the release manifest and writes only `Casks/mcpmate@beta.rb`.
+accepts only stable and beta release tags, validates the schema version,
+release channel, exact URLs, required assets, and SHA-256 digests, then writes
+only the selected Cask.

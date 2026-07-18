@@ -4,8 +4,10 @@ cask "mcpmate@beta" do
   version "0.3.4-beta"
 
   name "MCPMate"
-  desc "MCP server management and operations workspace"
+  desc "Beta channel for MCP server management and operations"
   homepage "https://mcpmate.ai/"
+
+  conflicts_with cask: "mcpmate"
 
   on_macos do
     on_arm do
@@ -34,7 +36,7 @@ cask "mcpmate@beta" do
   end
 
   caveats <<~EOS
-    MCPMate is a Beta release for macOS and Linux on arm64 and x64.
+    MCPMate Beta supports macOS and Linux on arm64 and x64.
     Linux AppImage installation requires Homebrew 5.1.12 or later.
     Exit the MCPMate app and any MCPMate service normally before uninstalling.
     Uninstall does not terminate services or remove ~/.mcpmate, including logs,
