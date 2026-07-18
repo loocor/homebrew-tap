@@ -58,7 +58,9 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Test Cask generator
-        run: bun test
+        run: |
+          bun run typecheck
+          bun test
 
       - name: Style and audit Cask
         env:
@@ -83,6 +85,20 @@ jobs:
           while IFS= read -r cask_path; do
             cask_token="$(basename "$cask_path" .rb)"
             brew info --cask "loocor/tap/$cask_token"
+          done <<< "$cask_paths"
+
+      - name: Check upstream release discovery
+        if: matrix.os == 'macos-latest' && matrix.homebrew == 'current'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cask_paths="$(git ls-files 'Casks/mcpmate*.rb')"
+          test -n "$cask_paths"
+          while IFS= read -r cask_path; do
+            cask_token="$(basename "$cask_path" .rb)"
+            brew livecheck --cask "loocor/tap/$cask_token"
           done <<< "$cask_paths"
 
       - name: Construct native Linux AppImage artifact
