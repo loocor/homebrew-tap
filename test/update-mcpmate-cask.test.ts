@@ -15,7 +15,7 @@ const repositoryRoot = join(import.meta.dir, "..");
 const fixturePath = join(
 	import.meta.dir,
 	"fixtures",
-	"release-manifest-v2.json",
+	"release-manifest-v2-beta-v0.3.4.json",
 );
 const betaCaskPath = join(repositoryRoot, "Casks", "mcpmate@beta.rb");
 const stableCaskPath = join(repositoryRoot, "Casks", "mcpmate.rb");
@@ -589,7 +589,7 @@ describe("update-mcpmate-cask", () => {
 		}
 	});
 
-	test("restores the tracked beta Cask after integration tests", async () => {
+	test("restores the pre-test beta Cask after integration tests", async () => {
 		expect(await readFile(betaCaskPath, "utf8")).toBe(originalCask);
 	});
 });
