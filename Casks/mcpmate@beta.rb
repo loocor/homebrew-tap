@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 cask "mcpmate@beta" do
-  version "0.3.4-beta"
+  version "0.3.5-beta"
 
   name "MCPMate"
   desc "Beta channel for MCP server management and operations"
@@ -26,11 +26,11 @@ cask "mcpmate@beta" do
 
   on_macos do
     on_arm do
-      sha256 "8f8f1c283e53d955b0da33d74afdde9bc30e92f6fc3114a18d2ebf6d75d29ce1"
+      sha256 "ba783d02a97a3a07c85426c96e0a4ff0cbca59c9cd30c2b82f57159a2a2057ec"
       url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/macos-arm64-dmg"
     end
     on_intel do
-      sha256 "2c32b23fccd61a9c67769e837d763dee8efddb0be45c95290fdeec2c9e4eb3be"
+      sha256 "a21b5a6693839ccbe8fa5a84cb329342d40c8bacfb42f8bed07d2c13fdeb84b1"
       url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/macos-x64-dmg"
     end
 
@@ -39,14 +39,14 @@ cask "mcpmate@beta" do
 
   on_linux do
     on_arm do
-      sha256 "25ec91d39a54d7bb5a9c63dda4f72335e9e6283a2693b0bc0e8bb103b0b8bff2"
+      sha256 "0292851a97b72c12e70717644dbc3869f811f46363c880d6b4064dea732d313e"
       url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-arm64-appimage"
-      app_image "MCPMate_0.3.4_linux_arm64.AppImage", target: "MCPMate.AppImage"
+      app_image "MCPMate_0.3.5_linux_arm64.AppImage", target: "MCPMate.AppImage"
     end
     on_intel do
-      sha256 "0295911991747e766cd3441f26dc9cd89c58fcf45018fd4ca1242c8277952f13"
+      sha256 "80fb514b905fc9c2b7882006a2720fe88acd2887bbdc53702d54f060414721c7"
       url "https://public.mcp.umate.ai/downloads/homebrew/v#{version}/linux-x64-appimage"
-      app_image "MCPMate_0.3.4_linux_x64.AppImage", target: "MCPMate.AppImage"
+      app_image "MCPMate_0.3.5_linux_x64.AppImage", target: "MCPMate.AppImage"
     end
   end
 
