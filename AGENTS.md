@@ -2,8 +2,10 @@
 
 ## Language
 
-- Keep conversation in Chinese.
-- Keep source code, comments, documentation, commit messages, and GitHub text in English.
+- Use Chinese only for direct interactive collaboration with Loocor.
+- Keep all repository content and GitHub-visible collaboration in English,
+  including source code, comments, documentation, commit messages, pull request
+  descriptions, review summaries, inline review comments, and issue comments.
 
 ## Development
 
