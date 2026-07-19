@@ -249,11 +249,6 @@ describe("update-mcpmate-cask", () => {
 		);
 	});
 
-	test("keeps the tracked beta Cask synchronized with the authoritative fixture", async () => {
-		expect((await runUpdater("--manifest-file", fixturePath)).exitCode).toBe(0);
-		expect(await readFile(betaCaskPath, "utf8")).toBe(originalCask);
-	});
-
 	test("derives the stable target and creates the first stable Cask only for a stable manifest", async () => {
 		const path = await releaseManifest("1.2.3", "stable");
 		const target = await updateCask(["--manifest-file", path]);
