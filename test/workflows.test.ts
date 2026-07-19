@@ -94,6 +94,20 @@ describe("tap CI workflow", () => {
 		);
 	});
 
+	test("installs and removes the macOS application artifact", async () => {
+		const workflow = await readWorkflow("ci.yml");
+
+		expect(workflow).toContain("if: runner.os == 'macOS'");
+		expect(workflow).toContain(
+			'HOMEBREW_NO_INSTALL_FROM_API=1 brew install --cask "loocor/tap/$cask_token"',
+		);
+		expect(workflow).toContain('test -d "/Applications/MCPMate.app"');
+		expect(workflow).toContain(
+			'brew uninstall --cask "loocor/tap/$cask_token"',
+		);
+		expect(workflow).toContain('test ! -e "/Applications/MCPMate.app"');
+	});
+
 	test("type-checks Bun scripts with the repository configuration", async () => {
 		const workflow = await readWorkflow("ci.yml");
 		const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
