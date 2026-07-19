@@ -101,6 +101,22 @@ jobs:
             brew livecheck --cask "loocor/tap/$cask_token"
           done <<< "$cask_paths"
 
+      - name: Install native macOS application
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          cask_paths="$(git ls-files 'Casks/mcpmate*.rb')"
+          test -n "$cask_paths"
+          while IFS= read -r cask_path; do
+            cask_token="$(basename "$cask_path" .rb)"
+            HOMEBREW_NO_INSTALL_FROM_API=1 brew install --cask "loocor/tap/$cask_token"
+            test -d "/Applications/MCPMate.app"
+            brew uninstall --cask "loocor/tap/$cask_token"
+            test ! -e "/Applications/MCPMate.app"
+          done <<< "$cask_paths"
+
       - name: Construct native Linux AppImage artifact
         if: runner.os == 'Linux'
         env:
